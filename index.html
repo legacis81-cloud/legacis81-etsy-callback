@@ -11,14 +11,14 @@
     body {
       font-family: Arial, sans-serif;
       background: #f4f5f7;
-      color: #222;
       padding: 20px;
+      color: #222;
     }
     main {
-      background: white;
       max-width: 480px;
       margin: 35px auto;
       padding: 24px;
+      background: white;
       border-radius: 14px;
     }
     input, button {
@@ -29,13 +29,17 @@
       font-size: 16px;
     }
     button {
-      border: none;
+      border: 0;
       border-radius: 8px;
       background: #222;
       color: white;
     }
+    button:disabled {
+      opacity: 0.5;
+    }
     #status {
       overflow-wrap: anywhere;
+      line-height: 1.5;
     }
   </style>
 </head>
@@ -43,9 +47,7 @@
 <main>
   <h2>Legacis81 Etsy Connection</h2>
 
-  <p id="status">
-    Ready to prepare Etsy authorization.
-  </p>
+  <p id="status">Ready to connect to Etsy.</p>
 
   <label for="clientId">Etsy API Keystring</label>
   <input
@@ -65,6 +67,9 @@
 const redirectUri =
   "https://legacis81-cloud.github.io/" +
   "legacis81-etsy-callback/";
+
+const tokenEndpoint =
+  "https://api.etsy.com/v3/public/oauth/token";
 
 const statusElement =
   document.getElementById("status");
@@ -86,9 +91,7 @@ function randomString() {
 
 function base64url(buffer) {
   return btoa(
-    String.fromCharCode(
-      ...new Uint8Array(buffer)
-    )
+    String.fromCharCode(...new Uint8Array(buffer))
   )
     .replace(/\+/g, "-")
     .replace(/\//g, "_")
@@ -104,7 +107,13 @@ async function createChallenge(verifier) {
   return base64url(digest);
 }
 
-async function prepareAuthorization() {
+function clearTemporaryData() {
+  sessionStorage.removeItem("etsy_verifier");
+  sessionStorage.removeItem("etsy_state");
+  sessionStorage.removeItem("etsy_client_id");
+}
+
+async function beginAuthorization() {
   const clientId = clientIdInput.value.trim();
 
   if (!clientId) {
@@ -118,23 +127,17 @@ async function prepareAuthorization() {
   try {
     const verifier = randomString();
     const state = randomString();
-
     const challenge =
       await createChallenge(verifier);
 
     sessionStorage.setItem(
-      "legacis81_etsy_verifier",
-      verifier
+      "etsy_verifier", verifier
     );
-
     sessionStorage.setItem(
-      "legacis81_etsy_state",
-      state
+      "etsy_state", state
     );
-
     sessionStorage.setItem(
-      "legacis81_etsy_client_id",
-      clientId
+      "etsy_client_id", clientId
     );
 
     const params = new URLSearchParams({
@@ -151,7 +154,6 @@ async function prepareAuthorization() {
       "https://www.etsy.com/oauth/connect?" +
       params.toString()
     );
-
   } catch (error) {
     statusElement.textContent =
       "Unable to prepare authorization.";
@@ -159,70 +161,124 @@ async function prepareAuthorization() {
   }
 }
 
-connectButton.addEventListener(
-  "click",
-  prepareAuthorization
-);
+async function handleCallback() {
+  const params = new URLSearchParams(
+    window.location.search
+  );
 
-const params = new URLSearchParams(
-  window.location.search
-);
+  const code = params.get("code");
+  const returnedState = params.get("state");
+  const error = params.get("error");
 
-const code = params.get("code");
-const returnedState = params.get("state");
-const error = params.get("error");
+  if (!code && !error) return;
 
-if (code || error) {
   history.replaceState(
     {},
     document.title,
     window.location.pathname
   );
 
-  const expectedState = sessionStorage.getItem(
-    "legacis81_etsy_state"
-  );
+  connectButton.disabled = true;
+  clientIdInput.style.display = "none";
 
-  const verifier = sessionStorage.getItem(
-    "legacis81_etsy_verifier"
-  );
+  const expectedState =
+    sessionStorage.getItem("etsy_state");
+
+  const verifier =
+    sessionStorage.getItem("etsy_verifier");
+
+  const clientId =
+    sessionStorage.getItem("etsy_client_id");
 
   if (error) {
     statusElement.textContent =
-      "Etsy authorization was declined.";
+      "Etsy authorization was cancelled or denied.";
+    clearTemporaryData();
+    return;
+  }
 
-    sessionStorage.removeItem(
-      "legacis81_etsy_verifier"
-    );
-    sessionStorage.removeItem(
-      "legacis81_etsy_state"
-    );
-
-  } else if (
-    code &&
-    expectedState &&
-    returnedState === expectedState &&
-    verifier
+  if (
+    !expectedState ||
+    returnedState !== expectedState ||
+    !verifier ||
+    !clientId
   ) {
     statusElement.textContent =
-      "Authorization verified. " +
-      "Token exchange is the next step.";
+      "Security verification failed. " +
+      "Start the connection again.";
+    clearTemporaryData();
+    return;
+  }
 
-    // Keep the verifier temporarily.
-    // Do not display or transmit OAuth secrets.
+  // Prevent reusing the state.
+  sessionStorage.removeItem("etsy_state");
 
-  } else {
+  statusElement.textContent =
+    "Authorization verified. " +
+    "Requesting Etsy token...";
+
+  try {
+    const body = new URLSearchParams({
+      grant_type: "authorization_code",
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      code: code,
+      code_verifier: verifier
+    });
+
+    const response = await fetch(
+      tokenEndpoint,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type":
+            "application/x-www-form-urlencoded"
+        },
+        body: body.toString(),
+        cache: "no-store"
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(
+        "Token request failed."
+      );
+    }
+
+    const data = await response.json();
+
+    if (
+      !data.access_token ||
+      !data.refresh_token
+    ) {
+      throw new Error(
+        "Missing token information."
+      );
+    }
+
+    // Do not print or display the tokens.
+    // This page does not persist tokens.
     statusElement.textContent =
-      "Security verification failed.";
+      "Etsy authorization succeeded. " +
+      "Tokens received temporarily, " +
+      "but not saved. " +
+      "A private storage step is still required.";
 
-    sessionStorage.removeItem(
-      "legacis81_etsy_verifier"
-    );
-    sessionStorage.removeItem(
-      "legacis81_etsy_state"
-    );
+  } catch (error) {
+    statusElement.textContent =
+      "Token exchange could not be completed. " +
+      "A secure server-side exchange may be required.";
+  } finally {
+    clearTemporaryData();
   }
 }
+
+connectButton.addEventListener(
+  "click",
+  beginAuthorization
+);
+
+handleCallback();
 </script>
 </body>
 </html>
