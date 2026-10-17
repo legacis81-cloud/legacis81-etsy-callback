@@ -12,64 +12,146 @@
       font-family: Arial, sans-serif;
       background: #f5f5f5;
       color: #222;
-      padding: 25px;
-      text-align: center;
+      padding: 24px;
     }
     main {
-      background: white;
-      border-radius: 12px;
-      padding: 25px;
       max-width: 480px;
-      margin: 40px auto;
+      margin: 35px auto;
+      padding: 24px;
+      background: white;
+      border-radius: 14px;
     }
-    .success { color: #16803c; }
-    .error { color: #b42318; }
+    input, button {
+      box-sizing: border-box;
+      width: 100%;
+      padding: 13px;
+      margin: 8px 0;
+      font-size: 16px;
+    }
+    button {
+      background: #222;
+      color: white;
+      border: 0;
+      border-radius: 8px;
+    }
+    #status {
+      overflow-wrap: anywhere;
+    }
   </style>
 </head>
 <body>
-  <main>
-    <h2>Legacis81 Etsy Connection</h2>
-    <p id="status">Checking authorization...</p>
-    <p id="details"></p>
-  </main>
+<main>
+  <h2>Legacis81 Etsy Connection</h2>
+  <p id="status">Ready to prepare Etsy authorization.</p>
 
-  <script>
-    const params = new URLSearchParams(
-      window.location.search
-    );
+  <label for="clientId">Etsy API Keystring</label>
+  <input id="clientId"
+         type="text"
+         autocomplete="off"
+         placeholder="Enter Etsy Keystring">
 
-    const code = params.get("code");
-    const state = params.get("state");
-    const error = params.get("error");
+  <button id="connect">Connect to Etsy</button>
+</main>
 
-    const status = document.getElementById("status");
-    const details = document.getElementById("details");
+<script>
+const redirectUri =
+  "https://legacis81-cloud.github.io/" +
+  "legacis81-etsy-callback/";
 
-    // Remove OAuth parameters from the address bar.
-    window.history.replaceState(
-      {},
-      document.title,
-      window.location.pathname
-    );
+const status = document.getElementById("status");
+const clientId = document.getElementById("clientId");
 
-    if (error) {
-      status.textContent = "Authorization failed.";
-      status.className = "error";
-      details.textContent =
-        "Return to your setup instructions.";
-    } else if (code && state) {
-      status.textContent =
-        "Authorization response received.";
-      status.className = "success";
-      details.textContent =
-        "The connection is not complete yet. " +
-        "Return to your setup instructions.";
-    } else {
-      status.textContent =
-        "Callback page is ready.";
-      details.textContent =
-        "Waiting for Etsy authorization.";
+function randomString() {
+  const bytes = new Uint8Array(48);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, b =>
+    b.toString(16).padStart(2, "0")
+  ).join("");
+}
+
+function base64url(bytes) {
+  return btoa(
+    String.fromCharCode(...new Uint8Array(bytes))
+  ).replace(/\+/g, "-")
+   .replace(/\//g, "_")
+   .replace(/=+$/, "");
+}
+
+async function createChallenge(verifier) {
+  const data = new TextEncoder().encode(verifier);
+  const hash = await crypto.subtle.digest("SHA-256", data);
+  return base64url(hash);
+}
+
+document.getElementById("connect").onclick =
+  async function () {
+    const key = clientId.value.trim();
+
+    if (!key) {
+      status.textContent = "Enter your Etsy Keystring.";
+      return;
     }
-  </script>
+
+    const verifier = randomString();
+    const state = randomString();
+    const challenge = await createChallenge(verifier);
+
+    sessionStorage.setItem("etsy_verifier", verifier);
+    sessionStorage.setItem("etsy_state", state);
+    sessionStorage.setItem("etsy_client_id", key);
+
+    const params = new URLSearchParams({
+      response_type: "code",
+      client_id: key,
+      redirect_uri: redirectUri,
+      scope: "shops_r listings_r",
+      state: state,
+      code_challenge: challenge,
+      code_challenge_method: "S256"
+    });
+
+    window.location.href =
+      "https://www.etsy.com/oauth/connect?" +
+      params.toString();
+  };
+
+const callback = new URLSearchParams(
+  window.location.search
+);
+
+const code = callback.get("code");
+const returnedState = callback.get("state");
+const error = callback.get("error");
+
+if (code || error) {
+  history.replaceState(
+    {},
+    document.title,
+    window.location.pathname
+  );
+
+  const expectedState =
+    sessionStorage.getItem("etsy_state");
+
+  if (error) {
+    status.textContent = "Etsy authorization was declined.";
+  } else if (
+    expectedState &&
+    returnedState === expectedState &&
+    sessionStorage.getItem("etsy_verifier")
+  ) {
+    status.textContent =
+      "Etsy authorization verified. " +
+      "Token exchange is not implemented yet.";
+  } else {
+    status.textContent =
+      "Security check failed. Authorization rejected.";
+  }
+
+  sessionStorage.removeItem("etsy_state");
+  sessionStorage.removeItem("etsy_verifier");
+  sessionStorage.removeItem("etsy_client_id");
+}
+</script>
 </body>
 </html>
