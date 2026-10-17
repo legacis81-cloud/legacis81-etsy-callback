@@ -5,28 +5,70 @@
   <meta charset="UTF-8">
   <meta name="viewport"
         content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
   <title>Legacis81 Etsy Connection</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f5f5f5;
+      color: #222;
+      padding: 25px;
+      text-align: center;
+    }
+    main {
+      background: white;
+      border-radius: 12px;
+      padding: 25px;
+      max-width: 480px;
+      margin: 40px auto;
+    }
+    .success { color: #16803c; }
+    .error { color: #b42318; }
+  </style>
 </head>
 <body>
-  <h2>Legacis81 Etsy Connection</h2>
-  <p id="status">Checking Etsy authorization...</p>
+  <main>
+    <h2>Legacis81 Etsy Connection</h2>
+    <p id="status">Checking authorization...</p>
+    <p id="details"></p>
+  </main>
+
   <script>
     const params = new URLSearchParams(
       window.location.search
     );
+
     const code = params.get("code");
     const state = params.get("state");
     const error = params.get("error");
 
+    const status = document.getElementById("status");
+    const details = document.getElementById("details");
+
+    // Remove OAuth parameters from the address bar.
+    window.history.replaceState(
+      {},
+      document.title,
+      window.location.pathname
+    );
+
     if (error) {
-      document.getElementById("status").textContent =
-        "Etsy authorization was not completed.";
+      status.textContent = "Authorization failed.";
+      status.className = "error";
+      details.textContent =
+        "Return to your setup instructions.";
     } else if (code && state) {
-      document.getElementById("status").textContent =
-        "Authorization received. Return to your setup instructions.";
+      status.textContent =
+        "Authorization response received.";
+      status.className = "success";
+      details.textContent =
+        "The connection is not complete yet. " +
+        "Return to your setup instructions.";
     } else {
-      document.getElementById("status").textContent =
+      status.textContent =
         "Callback page is ready.";
+      details.textContent =
+        "Waiting for Etsy authorization.";
     }
   </script>
 </body>
