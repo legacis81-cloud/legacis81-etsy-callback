@@ -1,0 +1,33 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport"
+        content="width=device-width, initial-scale=1">
+  <title>Legacis81 Etsy Connection</title>
+</head>
+<body>
+  <h2>Legacis81 Etsy Connection</h2>
+  <p id="status">Checking Etsy authorization...</p>
+  <script>
+    const params = new URLSearchParams(
+      window.location.search
+    );
+    const code = params.get("code");
+    const state = params.get("state");
+    const error = params.get("error");
+
+    if (error) {
+      document.getElementById("status").textContent =
+        "Etsy authorization was not completed.";
+    } else if (code && state) {
+      document.getElementById("status").textContent =
+        "Authorization received. Return to your setup instructions.";
+    } else {
+      document.getElementById("status").textContent =
+        "Callback page is ready.";
+    }
+  </script>
+</body>
+</html>
