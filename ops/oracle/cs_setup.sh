@@ -34,12 +34,18 @@ if [ $DIRECT = 0 ]; then
 if ! timeout 8 bash -c "</dev/tcp/host.bastion.uk-london-1.oci.oraclecloud.com/22" 2>/dev/null; then
   echo "✘ Cloud Shell est sur un réseau privé : en haut, Network → Public network, puis relance la commande."; exit 1; fi
 echo "➜ Ouverture d'une session Bastion de 3 h (≈ 1 min)…"
-SID=$(oci bastion session create-port-forwarding --bastion-id $BID --target-private-ip $IP --target-port 22 --ssh-public-key-file $KEY.pub --display-name LEG81-WATCH-$(date -u +%Y%m%d%H%M) --session-ttl 10800 --wait-for-state SUCCEEDED --query 'data.resources[0].identifier' --raw-output 2>/tmp/bsess.err)
+BK=~/.ssh/l81_bastion
+[ -f $BK ] || ssh-keygen -q -t rsa -b 4096 -N "" -C l81-bastion -f $BK
+SID=$(oci bastion session create-port-forwarding --bastion-id $BID --target-private-ip $IP --target-port 22 --ssh-public-key-file $BK.pub --display-name LEG81-WATCH-$(date -u +%Y%m%d%H%M) --session-ttl 10800 --wait-for-state SUCCEEDED --query 'data.resources[0].identifier' --raw-output 2>/tmp/bsess.err)
 [ -n "$SID" ] && [ "$SID" != "null" ] || { echo "✘ Session Bastion refusée :"; tail -5 /tmp/bsess.err; exit 1; }
 pkill -f "L 2222:" 2>/dev/null
-sleep 5
-ssh -i $KEY -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 -f -N -L 2222:$IP:22 -p 22 $SID@host.bastion.uk-london-1.oci.oraclecloud.com
-sleep 3
+for i in 1 2 3 4; do
+  sleep 15
+  ssh -i $BK -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30 -o ExitOnForwardFailure=yes -f -N -L 2222:$IP:22 -p 22 $SID@host.bastion.uk-london-1.oci.oraclecloud.com 2>/tmp/tun.err
+  sleep 3
+  timeout 5 bash -c "</dev/tcp/localhost/2222" 2>/dev/null && break
+  echo "  tunnel pas encore prêt, nouvel essai ($i/4)…"
+done
 cat > ~/.ssh/config <<CFG
 Host a1
   HostName localhost
