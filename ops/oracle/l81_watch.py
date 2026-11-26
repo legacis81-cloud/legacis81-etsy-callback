@@ -130,7 +130,9 @@ def label(m, uid, name):
         m.create(f'"{name}"')
     except Exception:
         pass
-    m.uid("COPY", uid, f'"{name}"')
+    status, _ = m.uid("COPY", uid, f'"{name}"')
+    if status != "OK":
+        raise RuntimeError("Gmail label operation failed")
 
 
 def check_gmail(cfg, c):
@@ -160,15 +162,20 @@ def check_gmail(cfg, c):
             c.execute("INSERT INTO items(msgid,cat,important,subject,sender,date,state,created) VALUES(?,?,?,?,?,?,?,?)",
                       (mid, cat, int(imp), subject, email.utils.parseaddr(sender)[1], dec(msg.get("Date")), "new", datetime.now(timezone.utc).isoformat()))
             iid = c.execute("SELECT id FROM items WHERE msgid=?", (mid,)).fetchone()[0]
+            kv_set(c, f"uid:{iid}", uid.decode())
+            if imp:
+                c.execute("UPDATE items SET state='pending' WHERE id=?", (iid,))
             c.commit()
             label(m, uid, LABEL_SEEN)
             new += 1
-            if imp:
+        for iid, cat, subject in c.execute("SELECT id,cat,subject FROM items WHERE state='pending'").fetchall():
+            if True:
                 icon = {"VENTE": "🛍️", "MESSAGE": "💬", "LITIGE": "⚠️", "ANNULATION": "❌", "PROBLEME PRINTFUL": "🚨"}.get(cat, "🔔")
                 send(cfg, f"{icon} {cat} — LEGACIS81\n{subject}\n\nQue fait-on ?",
                      [[{"text": "✅ Je m'en occupe", "callback_data": f"own:{iid}"},
                        {"text": "📝 Préparer une réponse", "callback_data": f"draft:{iid}"}]])
-                kv_set(c, f"uid:{iid}", uid.decode())
+                c.execute("UPDATE items SET state='new' WHERE id=?", (iid,))
+                c.commit()
         log(f"gmail ok, {len(uids)} emails lus, {new} nouveaux")
     finally:
         try:
@@ -189,6 +196,8 @@ def poll_telegram(cfg, c):
             act, _, iid = q.get("data", "").partition(":")
             row = c.execute("SELECT subject FROM items WHERE id=?", (iid,)).fetchone()
             uid = kv_get(c, f"uid:{iid}")
+            if act not in ("draft", "own") or not row or not uid:
+                continue
             target = LABEL_TODO if act == "draft" else LABEL_LOIC
             try:
                 m = imap(cfg); m.select("INBOX")
@@ -196,7 +205,8 @@ def poll_telegram(cfg, c):
                     label(m, uid.encode(), target)
                 m.logout()
             except Exception as e:
-                log("label err", e)
+                log("label operation failed", type(e).__name__)
+                continue
             c.execute("UPDATE items SET state=? WHERE id=?", (act, iid)); c.commit()
             tg(cfg, "answerCallbackQuery", callback_query_id=q["id"], text="Noté ✅")
             if act == "draft":
@@ -233,7 +243,7 @@ def main():
     c = db()
     if cmd == "chatid":
         ups = tg(cfg, "getUpdates", timeout=0)
-        ids = {u["message"]["chat"]["id"]: u["message"]["from"].get("first_name", "") for u in ups if "message" in u}
+        ids = {u["message"]["chat"]["id"]: u["message"]["from"].get("first_name", "") for u in ups if "message" in u and u["message"]["chat"].get("type") == "private" and u["message"].get("text") == "/start"}
         print(json.dumps(ids))
         return
     if cmd == "selftest":
@@ -247,18 +257,18 @@ def main():
     try:
         poll_telegram(cfg, c)
     except Exception as e:
-        errs.append(f"telegram: {e}")
+        errs.append(f"telegram: {type(e).__name__}")
     try:
         check_gmail(cfg, c)
         kv_set(c, "last_ok", datetime.now().strftime("%d/%m %H:%M"))
         kv_set(c, "fails", 0)
     except Exception as e:
-        errs.append(f"gmail: {e}")
+        errs.append(f"gmail: {type(e).__name__}")
         f = int(kv_get(c, "fails", "0")) + 1
         kv_set(c, "fails", f)
         if f == 3:
             try:
-                send(cfg, f"⚠️ LEGACIS81 : la lecture Gmail échoue depuis 15 min.\nDétail technique : {str(e)[:200]}")
+                send(cfg, f"⚠️ LEGACIS81 : la lecture Gmail échoue depuis 15 min.\nDétail technique : {type(e).__name__}")
             except Exception:
                 pass
     if errs:
