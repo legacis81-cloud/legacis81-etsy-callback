@@ -12,6 +12,23 @@ BID=$(oci bastion bastion list -c $T --all --query "data[?\"lifecycle-state\"=='
 echo "  serveur $IP"
 KEY=~/.ssh/legacis81_cloudshell_rsa
 [ -f $KEY ] || { echo "✘ Clé Cloud Shell absente : capture au RCO"; exit 1; }
+if timeout 8 bash -c "</dev/tcp/$IP/22" 2>/dev/null; then
+  echo "✔ Réseau privé : accès direct au serveur"
+  cat > ~/.ssh/config <<CFG
+Host a1
+  HostName $IP
+  User opc
+  IdentityFile $KEY
+  IdentityFile ~/.ssh/legacis81_cloudshell_ecdsa
+  StrictHostKeyChecking accept-new
+  UserKnownHostsFile ~/.ssh/known_hosts_a1
+CFG
+  chmod 600 ~/.ssh/config
+  DIRECT=1
+else DIRECT=0; fi
+if [ $DIRECT = 0 ]; then
+if ! timeout 8 bash -c "</dev/tcp/host.bastion.uk-london-1.oci.oraclecloud.com/22" 2>/dev/null; then
+  echo "✘ Cloud Shell est sur un réseau privé : en haut, Network → Public network, puis relance la commande."; exit 1; fi
 echo "➜ Ouverture d'une session Bastion de 3 h (≈ 1 min)…"
 SID=$(oci bastion session create-port-forwarding --bastion-id $BID --target-private-ip $IP --target-port 22 --ssh-public-key-file $KEY.pub --display-name LEG81-WATCH-$(date -u +%Y%m%d%H%M) --session-ttl 10800 --wait-for-state SUCCEEDED --query 'data.resources[0].identifier' --raw-output 2>/tmp/bsess.err)
 [ -n "$SID" ] && [ "$SID" != "null" ] || { echo "✘ Session Bastion refusée :"; tail -5 /tmp/bsess.err; exit 1; }
@@ -30,7 +47,8 @@ Host a1
   UserKnownHostsFile ~/.ssh/known_hosts_a1
 CFG
 chmod 600 ~/.ssh/config
-ssh -o ConnectTimeout=20 a1 'echo ok' >/dev/null 2>&1 || { echo "✘ Connexion au serveur impossible : capture au RCO"; exit 1; }
+fi
+ssh -o ConnectTimeout=20 -o BatchMode=yes a1 'echo ok' >/tmp/a1.err 2>&1 || { echo "✘ Connexion au serveur impossible : capture au RCO"; tail -3 /tmp/a1.err; exit 1; }
 echo "✔ Connecté au serveur"
 D=$(mktemp -d)
 for f in l81_watch.py install_a1.sh; do curl -fsSL "$BASE/$f" -o "$D/$f" || { echo "✘ Téléchargement $f"; exit 1; }; done
