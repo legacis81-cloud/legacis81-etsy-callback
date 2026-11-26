@@ -12,6 +12,10 @@ BID=$(oci bastion bastion list -c $T --all --query "data[?\"lifecycle-state\"=='
 echo "  serveur $IP"
 KEY=~/.ssh/legacis81_cloudshell_rsa
 [ -f $KEY ] || { echo "✘ Clé Cloud Shell absente : capture au RCO"; exit 1; }
+# Une seule saisie de la phrase secrète de la clé (si elle en a une), gardée en mémoire pour la session
+eval "$(ssh-agent -s)" >/dev/null
+echo "➜ Si une « passphrase » est demandée : tape celle de ta clé Cloud Shell (créée le 14/11), puis Entrée."
+ssh-add $KEY ~/.ssh/legacis81_cloudshell_ecdsa 2>/dev/null || ssh-add $KEY
 if timeout 8 bash -c "</dev/tcp/$IP/22" 2>/dev/null; then
   echo "✔ Réseau privé : accès direct au serveur"
   cat > ~/.ssh/config <<CFG
@@ -48,7 +52,7 @@ Host a1
 CFG
 chmod 600 ~/.ssh/config
 fi
-ssh -o ConnectTimeout=20 -o BatchMode=yes a1 'echo ok' >/tmp/a1.err 2>&1 || { echo "✘ Connexion au serveur impossible : capture au RCO"; tail -3 /tmp/a1.err; exit 1; }
+ssh -o ConnectTimeout=20 a1 'echo ok' >/tmp/a1.err 2>&1 || { echo "✘ Connexion au serveur impossible : capture au RCO"; tail -3 /tmp/a1.err; exit 1; }
 echo "✔ Connecté au serveur"
 D=$(mktemp -d)
 for f in l81_watch.py install_a1.sh; do curl -fsSL "$BASE/$f" -o "$D/$f" || { echo "✘ Téléchargement $f"; exit 1; }; done
